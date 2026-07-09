@@ -4,6 +4,8 @@ pipeline {
     environment {
         SERVICE_NAME = 'user-service'
         IMAGE_TAG = "v${BUILD_NUMBER}"
+        JAVA_HOME = '/opt/java/openjdk'
+        PATH = "/opt/java/openjdk/bin:${env.PATH}"
     }
 
     stages {
@@ -22,10 +24,13 @@ pipeline {
                     # Install kubectl
                     curl -sLO "https://dl.k8s.io/release/v1.28.0/bin/linux/amd64/kubectl"
                     chmod +x kubectl
-                    mv kubectl /usr/local/bin/ 2>/dev/null || export PATH=$PWD:$PATH
+                    mv kubectl /usr/local/bin/
 
                     # Install Trivy
                     curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b . latest
+
+                    # Verify java is accessible
+                    java -version
 
                     echo "✅ Tools installed"
                 '''
@@ -38,22 +43,22 @@ pipeline {
                     withSonarQubeEnv('SonarQube') {
                         sh '''
                             echo "🔍 Installing SonarQube Scanner..."
-                            export JAVA_HOME=/opt/java/openjdk
-                            export PATH=$JAVA_HOME/bin:$PATH
-                            
                             curl -sL https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-5.0.1.3006-linux.zip -o scanner.zip
                             jar xf scanner.zip
-                            chmod +x sonar-scanner-5.0.1.3006-linux/bin/sonar-scanner
 
                             echo "🔍 Running SonarQube Analysis on user-service..."
-                            ./sonar-scanner-5.0.1.3006-linux/bin/sonar-scanner \
+                            # Set JAVA_HOME in scanner config
+                            echo "sonar.host.url=$SONAR_HOST_URL" > sonar-scanner-5.0.1.3006-linux/conf/sonar-scanner.properties
+                            sed -i 's|use_embedded_jre=true|use_embedded_jre=false|g' sonar-scanner-5.0.1.3006-linux/bin/sonar-scanner 2>/dev/null || true
+                            
+                            # Run scanner directly via java
+                            java -jar sonar-scanner-5.0.1.3006-linux/lib/sonar-scanner-cli-5.0.1.3006.jar \
                               -Dsonar.projectKey=user-service \
                               -Dsonar.projectName="User Service" \
                               -Dsonar.sources=. \
-                              -Dsonar.exclusions=node_modules/**,sonar-scanner*/** \
+                              -Dsonar.exclusions=node_modules/**,sonar-scanner*/**,scanner.zip \
                               -Dsonar.host.url=$SONAR_HOST_URL \
-                              -Dsonar.token=$SONAR_AUTH_TOKEN \
-                              -Dsonar.java.binaries=.
+                              -Dsonar.token=$SONAR_AUTH_TOKEN
                         '''
                     }
                 }
@@ -77,7 +82,6 @@ pipeline {
             steps {
                 echo "☸️ Deploying to Kubernetes..."
                 sh """
-                    export PATH=\$PWD:\$PATH
                     kubectl get pods -n devsecops-apps -l app=${SERVICE_NAME} --no-headers
                     echo "✅ Current deployment verified"
                     
@@ -93,7 +97,6 @@ pipeline {
             steps {
                 echo "🏥 Verifying service health..."
                 sh '''
-                    export PATH=$PWD:$PATH
                     kubectl exec -n devsecops-apps deploy/gateway-service -- \
                       wget -qO- http://user-service:3001/health
                 '''
