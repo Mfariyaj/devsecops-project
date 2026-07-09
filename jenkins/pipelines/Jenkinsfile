@@ -21,15 +21,15 @@ pipeline {
             steps {
                 echo "🔧 Installing required tools..."
                 sh '''
-                    # Install kubectl
+                    # Install kubectl (keep in workspace)
                     curl -sLO "https://dl.k8s.io/release/v1.28.0/bin/linux/amd64/kubectl"
                     chmod +x kubectl
-                    mv kubectl /usr/local/bin/
 
-                    # Install Trivy
+                    # Install Trivy (keep in workspace)
                     curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b . latest
 
-                    # Verify java is accessible
+                    # Verify
+                    ./kubectl version --client --short 2>/dev/null || ./kubectl version --client
                     java -version
 
                     echo "✅ Tools installed"
@@ -82,12 +82,12 @@ pipeline {
             steps {
                 echo "☸️ Deploying to Kubernetes..."
                 sh """
-                    kubectl get pods -n devsecops-apps -l app=${SERVICE_NAME} --no-headers
+                    ./kubectl get pods -n devsecops-apps -l app=${SERVICE_NAME} --no-headers
                     echo "✅ Current deployment verified"
                     
                     # Restart deployment to pick up latest
-                    kubectl rollout restart deployment/${SERVICE_NAME} -n devsecops-apps
-                    kubectl rollout status deployment/${SERVICE_NAME} -n devsecops-apps --timeout=60s
+                    ./kubectl rollout restart deployment/${SERVICE_NAME} -n devsecops-apps
+                    ./kubectl rollout status deployment/${SERVICE_NAME} -n devsecops-apps --timeout=60s
                 """
                 echo "✅ Deployed to Kubernetes!"
             }
@@ -97,7 +97,7 @@ pipeline {
             steps {
                 echo "🏥 Verifying service health..."
                 sh '''
-                    kubectl exec -n devsecops-apps deploy/gateway-service -- \
+                    ./kubectl exec -n devsecops-apps deploy/gateway-service -- \
                       wget -qO- http://user-service:3001/health
                 '''
                 echo ""
