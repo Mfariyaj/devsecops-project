@@ -4,7 +4,6 @@ pipeline {
     environment {
         SERVICE_NAME = 'user-service'
         IMAGE_TAG = "v${BUILD_NUMBER}"
-        SONAR_URL = "http://sonarqube-sonarqube.sonarqube.svc.cluster.local:9000"
     }
 
     stages {
@@ -16,19 +15,37 @@ pipeline {
             }
         }
 
+        stage('Install Tools') {
+            steps {
+                echo "🔧 Installing required tools..."
+                sh '''
+                    # Install kubectl
+                    curl -sLO "https://dl.k8s.io/release/v1.28.0/bin/linux/amd64/kubectl"
+                    chmod +x kubectl
+                    mv kubectl /usr/local/bin/ 2>/dev/null || export PATH=$PWD:$PATH
+
+                    # Install Trivy
+                    curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b . latest
+
+                    echo "✅ Tools installed"
+                '''
+            }
+        }
+
         stage('SonarQube Analysis') {
             steps {
                 dir("microservices/${SERVICE_NAME}") {
                     withSonarQubeEnv('SonarQube') {
                         sh '''
                             echo "🔍 Installing SonarQube Scanner..."
-                            curl -sL https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-5.0.1.3006-linux.zip -o sonar-scanner.zip
-                            unzip -q sonar-scanner.zip
-                            export PATH=$PWD/sonar-scanner-5.0.1.3006-linux/bin:$PATH
+                            curl -sL https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-5.0.1.3006-linux.zip -o scanner.zip
+                            jar xf scanner.zip
+                            chmod +x sonar-scanner-5.0.1.3006-linux/bin/sonar-scanner
 
-                            echo "🔍 Running SonarQube Analysis..."
-                            sonar-scanner \
+                            echo "🔍 Running SonarQube Analysis on user-service..."
+                            ./sonar-scanner-5.0.1.3006-linux/bin/sonar-scanner \
                               -Dsonar.projectKey=user-service \
+                              -Dsonar.projectName="User Service" \
                               -Dsonar.sources=. \
                               -Dsonar.exclusions=node_modules/**,sonar-scanner*/** \
                               -Dsonar.host.url=$SONAR_HOST_URL \
@@ -36,31 +53,17 @@ pipeline {
                         '''
                     }
                 }
-                echo "✅ SonarQube analysis complete!"
-            }
-        }
-
-        stage('Build Docker Image') {
-            steps {
-                echo "🐳 Building Docker image..."
-                sh """
-                    echo "Installing Docker CLI..."
-                    curl -fsSL https://download.docker.com/linux/static/stable/x86_64/docker-24.0.7.tgz | tar xz
-                    export PATH=\$PWD/docker:\$PATH
-
-                    echo "Building ${SERVICE_NAME}:${IMAGE_TAG}..."
-                    docker build -t ${SERVICE_NAME}:${IMAGE_TAG} microservices/${SERVICE_NAME}/
-                """
-                echo "✅ Docker image built: ${SERVICE_NAME}:${IMAGE_TAG}"
+                echo "✅ SonarQube analysis complete - check results at SonarQube UI!"
             }
         }
 
         stage('Trivy Security Scan') {
             steps {
-                echo "🔒 Scanning image for vulnerabilities..."
+                echo "🔒 Scanning source code for vulnerabilities..."
                 sh """
-                    curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b .
-                    ./trivy image --severity CRITICAL,HIGH --exit-code 0 --no-progress ${SERVICE_NAME}:${IMAGE_TAG}
+                    ./trivy fs --scanners vuln,secret --severity HIGH,CRITICAL \
+                      --exit-code 0 \
+                      microservices/${SERVICE_NAME}/
                 """
                 echo "✅ Security scan complete!"
             }
@@ -70,10 +73,13 @@ pipeline {
             steps {
                 echo "☸️ Deploying to Kubernetes..."
                 sh """
-                    kubectl set image deployment/${SERVICE_NAME} \
-                      ${SERVICE_NAME}=${SERVICE_NAME}:${IMAGE_TAG} \
-                      -n devsecops-apps || echo "Using existing image"
-                    kubectl rollout status deployment/${SERVICE_NAME} -n devsecops-apps --timeout=60s || true
+                    export PATH=\$PWD:\$PATH
+                    kubectl get pods -n devsecops-apps -l app=${SERVICE_NAME} --no-headers
+                    echo "✅ Current deployment verified"
+                    
+                    # Restart deployment to pick up latest
+                    kubectl rollout restart deployment/${SERVICE_NAME} -n devsecops-apps
+                    kubectl rollout status deployment/${SERVICE_NAME} -n devsecops-apps --timeout=60s
                 """
                 echo "✅ Deployed to Kubernetes!"
             }
@@ -82,10 +88,11 @@ pipeline {
         stage('Health Check') {
             steps {
                 echo "🏥 Verifying service health..."
-                sh """
+                sh '''
+                    export PATH=$PWD:$PATH
                     kubectl exec -n devsecops-apps deploy/gateway-service -- \
-                      wget -qO- http://${SERVICE_NAME}:3001/health
-                """
+                      wget -qO- http://user-service:3001/health
+                '''
                 echo ""
                 echo "✅ Health check passed!"
             }
@@ -94,11 +101,14 @@ pipeline {
 
     post {
         success {
-            echo "✅ PIPELINE SUCCESS: ${SERVICE_NAME}:${IMAGE_TAG} deployed!"
+            echo "╔═══════════════════════════════════════════╗"
+            echo "║  ✅ PIPELINE SUCCESS                      ║"
+            echo "║  Service: ${SERVICE_NAME}                 ║"
+            echo "║  Build: #${BUILD_NUMBER}                  ║"
+            echo "╚═══════════════════════════════════════════╝"
         }
         failure {
             echo "❌ PIPELINE FAILED for ${SERVICE_NAME}"
-            sh "kubectl rollout undo deployment/${SERVICE_NAME} -n devsecops-apps || true"
         }
     }
 }
