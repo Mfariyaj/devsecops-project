@@ -47,18 +47,17 @@ pipeline {
                             jar xf scanner.zip
 
                             echo "🔍 Running SonarQube Analysis on user-service..."
-                            # Set JAVA_HOME in scanner config
-                            echo "sonar.host.url=$SONAR_HOST_URL" > sonar-scanner-5.0.1.3006-linux/conf/sonar-scanner.properties
-                            sed -i 's|use_embedded_jre=true|use_embedded_jre=false|g' sonar-scanner-5.0.1.3006-linux/bin/sonar-scanner 2>/dev/null || true
                             
-                            # Run scanner directly via java
-                            java -jar sonar-scanner-5.0.1.3006-linux/lib/sonar-scanner-cli-5.0.1.3006.jar \
+                            # Run scanner with increased memory to avoid OutOfMemoryError
+                            java -Xmx384m -jar sonar-scanner-5.0.1.3006-linux/lib/sonar-scanner-cli-5.0.1.3006.jar \
                               -Dsonar.projectKey=user-service \
                               -Dsonar.projectName="User Service" \
                               -Dsonar.sources=. \
                               -Dsonar.exclusions=node_modules/**,sonar-scanner*/**,scanner.zip \
                               -Dsonar.host.url=$SONAR_HOST_URL \
-                              -Dsonar.token=$SONAR_AUTH_TOKEN
+                              -Dsonar.token=$SONAR_AUTH_TOKEN \
+                              -Dsonar.javascript.node.maxspace=128 \
+                              -Dsonar.scanner.skipJreProvisioning=true
                         '''
                     }
                 }
