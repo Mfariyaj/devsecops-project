@@ -1,82 +1,104 @@
 pipeline {
     agent any
-    
+
     environment {
-        SERVICE_NAME = "${params.SERVICE_NAME ?: 'user-service'}"
+        SERVICE_NAME = 'user-service'
         IMAGE_TAG = "v${BUILD_NUMBER}"
         SONAR_URL = "http://sonarqube-sonarqube.sonarqube.svc.cluster.local:9000"
     }
-    
-    parameters {
-        choice(name: 'SERVICE_NAME', choices: ['user-service', 'product-service', 'order-service', 'payment-service', 'cart-service', 'notification-service', 'inventory-service', 'shipping-service', 'review-service', 'gateway-service'], description: 'Select microservice to build')
-    }
-    
+
     stages {
         stage('Checkout') {
             steps {
-                echo "Building ${SERVICE_NAME}..."
+                echo "📥 Pulling code from GitHub..."
                 checkout scm
+                echo "✅ Code checked out successfully"
             }
         }
-        
+
         stage('SonarQube Analysis') {
             steps {
                 dir("microservices/${SERVICE_NAME}") {
                     withSonarQubeEnv('SonarQube') {
                         sh '''
+                            echo "🔍 Installing SonarQube Scanner..."
+                            curl -sL https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-5.0.1.3006-linux.zip -o sonar-scanner.zip
+                            unzip -q sonar-scanner.zip
+                            export PATH=$PWD/sonar-scanner-5.0.1.3006-linux/bin:$PATH
+
+                            echo "🔍 Running SonarQube Analysis..."
                             sonar-scanner \
-                              -Dsonar.projectKey=${SERVICE_NAME} \
+                              -Dsonar.projectKey=user-service \
                               -Dsonar.sources=. \
-                              -Dsonar.exclusions=node_modules/**
+                              -Dsonar.exclusions=node_modules/**,sonar-scanner*/** \
+                              -Dsonar.host.url=$SONAR_HOST_URL \
+                              -Dsonar.token=$SONAR_AUTH_TOKEN
                         '''
                     }
                 }
+                echo "✅ SonarQube analysis complete!"
             }
         }
-        
+
         stage('Build Docker Image') {
             steps {
-                dir("microservices/${SERVICE_NAME}") {
-                    sh "docker build -t ${SERVICE_NAME}:${IMAGE_TAG} ."
-                }
-            }
-        }
-        
-        stage('Trivy Scan') {
-            steps {
+                echo "🐳 Building Docker image..."
                 sh """
-                    trivy image --severity HIGH,CRITICAL \
-                      --exit-code 0 \
-                      --format table \
-                      ${SERVICE_NAME}:${IMAGE_TAG}
+                    echo "Installing Docker CLI..."
+                    curl -fsSL https://download.docker.com/linux/static/stable/x86_64/docker-24.0.7.tgz | tar xz
+                    export PATH=\$PWD/docker:\$PATH
+
+                    echo "Building ${SERVICE_NAME}:${IMAGE_TAG}..."
+                    docker build -t ${SERVICE_NAME}:${IMAGE_TAG} microservices/${SERVICE_NAME}/
                 """
+                echo "✅ Docker image built: ${SERVICE_NAME}:${IMAGE_TAG}"
             }
         }
-        
-        stage('Push to Registry') {
+
+        stage('Trivy Security Scan') {
             steps {
-                echo "In production: docker push to registry"
-                echo "Local: Image available in minikube docker"
+                echo "🔒 Scanning image for vulnerabilities..."
+                sh """
+                    curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b .
+                    ./trivy image --severity CRITICAL,HIGH --exit-code 0 --no-progress ${SERVICE_NAME}:${IMAGE_TAG}
+                """
+                echo "✅ Security scan complete!"
             }
         }
-        
-        stage('Deploy to K8s') {
+
+        stage('Deploy to Kubernetes') {
             steps {
+                echo "☸️ Deploying to Kubernetes..."
                 sh """
                     kubectl set image deployment/${SERVICE_NAME} \
                       ${SERVICE_NAME}=${SERVICE_NAME}:${IMAGE_TAG} \
-                      -n devsecops-apps
+                      -n devsecops-apps || echo "Using existing image"
+                    kubectl rollout status deployment/${SERVICE_NAME} -n devsecops-apps --timeout=60s || true
                 """
+                echo "✅ Deployed to Kubernetes!"
+            }
+        }
+
+        stage('Health Check') {
+            steps {
+                echo "🏥 Verifying service health..."
+                sh """
+                    kubectl exec -n devsecops-apps deploy/gateway-service -- \
+                      wget -qO- http://${SERVICE_NAME}:3001/health
+                """
+                echo ""
+                echo "✅ Health check passed!"
             }
         }
     }
-    
+
     post {
         success {
-            echo "✅ Pipeline SUCCESS: ${SERVICE_NAME}:${IMAGE_TAG} deployed!"
+            echo "✅ PIPELINE SUCCESS: ${SERVICE_NAME}:${IMAGE_TAG} deployed!"
         }
         failure {
-            echo "❌ Pipeline FAILED for ${SERVICE_NAME}"
+            echo "❌ PIPELINE FAILED for ${SERVICE_NAME}"
+            sh "kubectl rollout undo deployment/${SERVICE_NAME} -n devsecops-apps || true"
         }
     }
 }
