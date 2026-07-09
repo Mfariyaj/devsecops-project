@@ -1,0 +1,42 @@
+# ============================================
+# Prometheus: ServiceMonitor for microservices
+# Scrapes /metrics from each service
+# ============================================
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: devsecops-services
+  namespace: monitoring
+  labels:
+    release: monitoring
+spec:
+  namespaceSelector:
+    matchNames:
+    - devsecops-apps
+  selector:
+    matchLabels: {}
+  endpoints:
+  - port: http
+    path: /metrics
+    interval: 15s
+    scrapeTimeout: 10s
+---
+# ServiceMonitor for Jenkins
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: jenkins-monitor
+  namespace: monitoring
+  labels:
+    release: monitoring
+spec:
+  namespaceSelector:
+    matchNames:
+    - jenkins
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: jenkins
+  endpoints:
+  - port: http
+    path: /prometheus/
+    interval: 30s

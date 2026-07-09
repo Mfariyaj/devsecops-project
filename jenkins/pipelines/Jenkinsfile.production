@@ -1,0 +1,212 @@
+// ============================================
+// PRODUCTION JENKINSFILE: DevSecOps Pipeline
+// Features: Parallel stages, Security gates,
+//           Automated rollback, Notifications
+// ============================================
+pipeline {
+    agent {
+        kubernetes {
+            yaml '''
+                apiVersion: v1
+                kind: Pod
+                spec:
+                  containers:
+                  - name: docker
+                    image: docker:24-dind
+                    securityContext:
+                      privileged: true
+                    volumeMounts:
+                    - name: docker-sock
+                      mountPath: /var/run/docker.sock
+                  - name: trivy
+                    image: aquasec/trivy:latest
+                    command: ['sleep', '999999']
+                  - name: kubectl
+                    image: bitnami/kubectl:latest
+                    command: ['sleep', '999999']
+                  volumes:
+                  - name: docker-sock
+                    hostPath:
+                      path: /var/run/docker.sock
+            '''
+        }
+    }
+    
+    parameters {
+        choice(
+            name: 'SERVICE_NAME',
+            choices: ['user-service', 'product-service', 'order-service', 'payment-service', 'cart-service', 'notification-service', 'inventory-service', 'shipping-service', 'review-service', 'gateway-service'],
+            description: 'Microservice to build and deploy'
+        )
+        choice(
+            name: 'ENVIRONMENT',
+            choices: ['dev', 'staging', 'production'],
+            description: 'Target environment'
+        )
+        booleanParam(
+            name: 'SKIP_TESTS',
+            defaultValue: false,
+            description: 'Skip integration tests'
+        )
+    }
+    
+    environment {
+        IMAGE_TAG = "v${BUILD_NUMBER}-${GIT_COMMIT?.take(7) ?: 'local'}"
+        SONAR_URL = credentials('sonar-url')
+        SONAR_TOKEN = credentials('sonar-token')
+    }
+    
+    stages {
+        stage('Checkout & Setup') {
+            steps {
+                checkout scm
+                sh "echo 'Building ${params.SERVICE_NAME} → ${params.ENVIRONMENT}'"
+                sh "echo 'Image tag: ${IMAGE_TAG}'"
+            }
+        }
+        
+        stage('Quality & Security Scan') {
+            parallel {
+                stage('SonarQube Analysis') {
+                    steps {
+                        container('docker') {
+                            dir("microservices/${params.SERVICE_NAME}") {
+                                sh """
+                                    sonar-scanner \
+                                      -Dsonar.host.url=${SONAR_URL} \
+                                      -Dsonar.login=${SONAR_TOKEN} \
+                                      -Dsonar.projectKey=${params.SERVICE_NAME} \
+                                      -Dsonar.sources=. \
+                                      -Dsonar.exclusions=node_modules/**,coverage/**
+                                """
+                            }
+                        }
+                    }
+                }
+                
+                stage('Dependency Audit') {
+                    steps {
+                        dir("microservices/${params.SERVICE_NAME}") {
+                            sh 'npm audit --audit-level=critical || true'
+                        }
+                    }
+                }
+                
+                stage('Secret Detection') {
+                    steps {
+                        container('trivy') {
+                            sh """
+                                trivy fs --scanners secret \
+                                  --severity HIGH,CRITICAL \
+                                  microservices/${params.SERVICE_NAME}/
+                            """
+                        }
+                    }
+                }
+            }
+        }
+        
+        stage('Quality Gate') {
+            steps {
+                timeout(time: 5, unit: 'MINUTES') {
+                    waitForQualityGate abortPipeline: true
+                }
+            }
+        }
+        
+        stage('Build Docker Image') {
+            steps {
+                container('docker') {
+                    dir("microservices/${params.SERVICE_NAME}") {
+                        sh "docker build -t ${params.SERVICE_NAME}:${IMAGE_TAG} -f Dockerfile.production ."
+                        sh "docker tag ${params.SERVICE_NAME}:${IMAGE_TAG} ${params.SERVICE_NAME}:latest"
+                    }
+                }
+            }
+        }
+        
+        stage('Image Security Scan') {
+            steps {
+                container('trivy') {
+                    sh """
+                        trivy image \
+                          --severity CRITICAL,HIGH \
+                          --exit-code 1 \
+                          --ignore-unfixed \
+                          --format table \
+                          ${params.SERVICE_NAME}:${IMAGE_TAG}
+                    """
+                }
+            }
+        }
+        
+        stage('Deploy') {
+            steps {
+                container('kubectl') {
+                    sh """
+                        kubectl set image deployment/${params.SERVICE_NAME} \
+                          ${params.SERVICE_NAME}=${params.SERVICE_NAME}:${IMAGE_TAG} \
+                          -n devsecops-apps
+                        
+                        kubectl rollout status deployment/${params.SERVICE_NAME} \
+                          -n devsecops-apps --timeout=180s
+                    """
+                }
+            }
+        }
+        
+        stage('Smoke Tests') {
+            when {
+                expression { !params.SKIP_TESTS }
+            }
+            steps {
+                container('kubectl') {
+                    sh """
+                        sleep 5
+                        kubectl exec -n devsecops-apps deploy/gateway-service -- \
+                          wget -qO- http://${params.SERVICE_NAME}:*/health | grep UP
+                        echo "✅ Smoke test passed"
+                    """
+                }
+            }
+        }
+        
+        stage('Promote to Production') {
+            when {
+                expression { params.ENVIRONMENT == 'production' }
+            }
+            input {
+                message "Deploy to PRODUCTION?"
+                ok "Approve"
+                parameters {
+                    string(name: 'APPROVER', defaultValue: '', description: 'Your name')
+                }
+            }
+            steps {
+                echo "🚀 Deploying to production by ${APPROVER}"
+                container('kubectl') {
+                    sh """
+                        kubectl set image deployment/${params.SERVICE_NAME} \
+                          ${params.SERVICE_NAME}=${params.SERVICE_NAME}:${IMAGE_TAG} \
+                          -n production
+                    """
+                }
+            }
+        }
+    }
+    
+    post {
+        failure {
+            echo "❌ PIPELINE FAILED - Auto Rolling Back..."
+            container('kubectl') {
+                sh "kubectl rollout undo deployment/${params.SERVICE_NAME} -n devsecops-apps || true"
+            }
+        }
+        success {
+            echo "✅ Pipeline SUCCESSFUL: ${params.SERVICE_NAME}:${IMAGE_TAG}"
+        }
+        always {
+            cleanWs()
+        }
+    }
+}

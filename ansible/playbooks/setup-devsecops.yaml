@@ -1,0 +1,62 @@
+---
+- name: DevSecOps Environment Setup
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  
+  vars:
+    project_dir: "{{ ansible_env.HOME }}/devops-projects/devsecops-project"
+    services:
+      - { name: "user-service", port: 3001 }
+      - { name: "product-service", port: 3002 }
+      - { name: "order-service", port: 3003 }
+      - { name: "payment-service", port: 3004 }
+      - { name: "cart-service", port: 3005 }
+      - { name: "notification-service", port: 3006 }
+      - { name: "inventory-service", port: 3007 }
+      - { name: "shipping-service", port: 3008 }
+      - { name: "review-service", port: 3009 }
+      - { name: "gateway-service", port: 3000 }
+
+  tasks:
+    - name: Check minikube status
+      command: minikube status
+      register: minikube_status
+      changed_when: false
+      failed_when: false
+
+    - name: Start minikube if not running
+      command: minikube start --cpus=4 --memory=6144 --driver=docker
+      when: minikube_status.rc != 0
+
+    - name: Create Kubernetes namespaces
+      command: "kubectl create namespace {{ item }} --dry-run=client -o yaml | kubectl apply -f -"
+      loop:
+        - devsecops-apps
+        - jenkins
+        - sonarqube
+        - argocd
+        - istio-system
+        - monitoring
+
+    - name: Build Docker images
+      shell: |
+        eval $(minikube docker-env)
+        docker build -t {{ item.name }}:v1 {{ project_dir }}/microservices/{{ item.name }}/
+      loop: "{{ services }}"
+      register: build_results
+
+    - name: Deploy microservices to Kubernetes
+      command: kubectl apply -f {{ project_dir }}/k8s-manifests/base/
+      register: deploy_result
+
+    - name: Wait for all pods to be ready
+      command: kubectl wait --for=condition=ready pod --all -n devsecops-apps --timeout=120s
+
+    - name: Verify deployment
+      command: kubectl get pods -n devsecops-apps
+      register: pods_status
+
+    - name: Show deployment status
+      debug:
+        var: pods_status.stdout_lines

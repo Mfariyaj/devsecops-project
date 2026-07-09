@@ -1,0 +1,63 @@
+# ============================================
+# Istio: Fault Injection for Chaos Testing
+# - Inject 500 errors to 10% of payment traffic
+# - Add 3s delay to 20% of order traffic
+# ============================================
+---
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: payment-service-fault
+  namespace: devsecops-apps
+spec:
+  hosts:
+  - payment-service
+  http:
+  - fault:
+      abort:
+        httpStatus: 500
+        percentage:
+          value: 10.0
+    route:
+    - destination:
+        host: payment-service
+---
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: order-service-delay
+  namespace: devsecops-apps
+spec:
+  hosts:
+  - order-service
+  http:
+  - fault:
+      delay:
+        fixedDelay: 3s
+        percentage:
+          value: 20.0
+    route:
+    - destination:
+        host: order-service
+---
+# Circuit Breaker: Eject unhealthy pods
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: payment-service-circuit-breaker
+  namespace: devsecops-apps
+spec:
+  host: payment-service
+  trafficPolicy:
+    connectionPool:
+      tcp:
+        maxConnections: 50
+      http:
+        http1MaxPendingRequests: 50
+        http2MaxRequests: 100
+        maxRequestsPerConnection: 10
+    outlierDetection:
+      consecutive5xxErrors: 3
+      interval: 10s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 50

@@ -1,0 +1,46 @@
+controller:
+  image:
+    tag: "lts"
+  resources:
+    requests:
+      cpu: "250m"
+      memory: "512Mi"
+    limits:
+      cpu: "1000m"
+      memory: "1536Mi"
+  serviceType: NodePort
+  nodePort: 32000
+  installPlugins:
+    - kubernetes:latest
+    - workflow-aggregator:latest
+    - git:latest
+    - pipeline-stage-view:latest
+    - docker-workflow:latest
+    - blueocean:latest
+    - sonar:latest
+    - configuration-as-code:latest
+    - job-dsl:latest
+    - pipeline-utility-steps:latest
+  admin:
+    username: "admin"
+    password: "admin123"
+  JCasC:
+    defaultConfig: true
+    configScripts:
+      welcome-message: |
+        jenkins:
+          systemMessage: "DevSecOps Jenkins - Configured via JCasC"
+
+persistence:
+  enabled: true
+  size: "5Gi"
+
+agent:
+  enabled: true
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "256Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"

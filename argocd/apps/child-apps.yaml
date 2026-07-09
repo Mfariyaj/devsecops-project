@@ -1,0 +1,137 @@
+# ============================================
+# ArgoCD Sync Waves:
+#   Wave 0: Infrastructure (ConfigMaps, Secrets, RBAC)
+#   Wave 1: Core services (user, product, inventory)
+#   Wave 2: Business services (order, payment, cart)
+#   Wave 3: Supporting services (notification, shipping, review)
+#   Wave 4: Gateway (depends on all others)
+# ============================================
+---
+# Wave 0: Infrastructure
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: infra-config
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/YOUR_USERNAME/devsecops-project.git
+    targetRevision: main
+    path: k8s-manifests/base
+    directory:
+      include: '{configmap-secrets.yaml,rbac.yaml,network-policies.yaml,hpa-user-service.yaml}'
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: devsecops-apps
+  syncPolicy:
+    automated:
+      selfHeal: true
+---
+# Wave 1: Core Services
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: core-services
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/YOUR_USERNAME/devsecops-project.git
+    targetRevision: main
+    path: k8s-manifests/base
+    directory:
+      include: '{user-service.yaml,product-service.yaml,inventory-service.yaml}'
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: devsecops-apps
+  syncPolicy:
+    automated:
+      selfHeal: true
+      prune: true
+---
+# Wave 2: Business Services
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: business-services
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/YOUR_USERNAME/devsecops-project.git
+    targetRevision: main
+    path: k8s-manifests/base
+    directory:
+      include: '{order-service.yaml,payment-service.yaml,cart-service.yaml}'
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: devsecops-apps
+  syncPolicy:
+    automated:
+      selfHeal: true
+      prune: true
+---
+# Wave 3: Supporting Services
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: support-services
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/YOUR_USERNAME/devsecops-project.git
+    targetRevision: main
+    path: k8s-manifests/base
+    directory:
+      include: '{notification-service.yaml,shipping-service.yaml,review-service.yaml}'
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: devsecops-apps
+  syncPolicy:
+    automated:
+      selfHeal: true
+      prune: true
+---
+# Wave 4: API Gateway
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: api-gateway
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/YOUR_USERNAME/devsecops-project.git
+    targetRevision: main
+    path: k8s-manifests/base
+    directory:
+      include: 'gateway-service.yaml'
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: devsecops-apps
+  syncPolicy:
+    automated:
+      selfHeal: true
+      prune: true

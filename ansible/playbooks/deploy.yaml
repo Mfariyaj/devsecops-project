@@ -1,0 +1,117 @@
+---
+# ============================================
+# Master Playbook: Full DevSecOps Deployment
+# Usage: ansible-playbook -i inventory/hosts.ini playbooks/deploy.yaml --vault-password-file .vault-password
+# ============================================
+- name: DevSecOps Full Deployment
+  hosts: localhost
+  connection: local
+  gather_facts: true
+
+  vars_files:
+    - vault-secrets.yml
+
+  vars:
+    env: "{{ target_env | default('dev') }}"
+    project_dir: "{{ ansible_env.HOME }}/devops-projects/devsecops-project"
+    docker_registry: "localhost:5000"
+    image_tag: "{{ lookup('pipe', 'date +%Y%m%d-%H%M') }}"
+
+  pre_tasks:
+    - name: Validate environment
+      assert:
+        that:
+          - env in ['dev', 'staging', 'production']
+        fail_msg: "Invalid environment: {{ env }}"
+
+    - name: Check minikube is running
+      command: minikube status --format '{{ "{{" }}.Host{{ "}}" }}'
+      register: minikube_check
+      changed_when: false
+      failed_when: minikube_check.stdout != "Running"
+
+    - name: Check kubectl connectivity
+      command: kubectl cluster-info
+      register: cluster_info
+      changed_when: false
+
+  roles:
+    - role: kubernetes
+
+  tasks:
+    - name: Build Docker images for all services
+      shell: |
+        eval $(minikube docker-env)
+        docker build -t {{ item.name }}:{{ image_tag }} {{ project_dir }}/microservices/{{ item.name }}/
+      loop: "{{ services }}"
+      when: build_images | default(false) | bool
+      tags: ['build']
+
+    - name: Update deployment images
+      command: >
+        kubectl set image deployment/{{ item.name }}
+        {{ item.name }}={{ item.name }}:{{ image_tag }}
+        -n devsecops-apps
+      loop: "{{ services }}"
+      when: build_images | default(false) | bool
+      tags: ['deploy']
+
+    - name: Run Trivy scan on all images
+      shell: |
+        eval $(minikube docker-env)
+        trivy image --severity CRITICAL --exit-code 1 -q {{ item.name }}:v1
+      loop: "{{ services }}"
+      register: trivy_results
+      failed_when: false
+      tags: ['security']
+
+    - name: Report security scan results
+      debug:
+        msg: "{{ item.item.name }}: {{ 'PASS ✅' if item.rc == 0 else 'FAIL ❌ (has CRITICAL vulnerabilities)' }}"
+      loop: "{{ trivy_results.results }}"
+      tags: ['security']
+
+    - name: Apply Istio configurations
+      command: "kubectl apply -f {{ project_dir }}/istio/{{ item }}/"
+      loop:
+        - gateway
+        - virtual-services
+        - destination-rules
+      when: istio_enabled | default(false) | bool
+      tags: ['istio']
+
+    - name: Apply monitoring configurations
+      command: "kubectl apply -f {{ project_dir }}/monitoring/{{ item }}/"
+      loop:
+        - prometheus
+        - grafana/dashboards
+      tags: ['monitoring']
+
+    - name: Verify all services healthy
+      command: >
+        kubectl exec -n devsecops-apps deploy/gateway-service --
+        wget -qO- http://{{ item.name }}:{{ item.port }}/health
+      loop: "{{ services }}"
+      register: health_checks
+      retries: 3
+      delay: 5
+      until: health_checks.rc == 0
+      changed_when: false
+      tags: ['verify']
+
+    - name: Deployment Summary
+      debug:
+        msg: |
+          ✅ Deployment Complete!
+          Environment: {{ env }}
+          Image Tag: {{ image_tag }}
+          Services Deployed: {{ services | length }}
+          Cluster: {{ cluster_info.stdout_lines[0] }}
+      tags: ['always']
+
+  handlers:
+    - name: Rollback deployment
+      command: >
+        kubectl rollout undo deployment/{{ item.name }} -n devsecops-apps
+      loop: "{{ services }}"
+      when: rollback | default(false) | bool

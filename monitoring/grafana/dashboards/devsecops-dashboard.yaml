@@ -1,0 +1,93 @@
+# ============================================
+# Grafana Dashboard: Microservices Overview
+# Auto-provisioned via ConfigMap
+# ============================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: devsecops-dashboard
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  devsecops-overview.json: |
+    {
+      "dashboard": {
+        "title": "DevSecOps Microservices",
+        "uid": "devsecops-overview",
+        "timezone": "browser",
+        "refresh": "10s",
+        "panels": [
+          {
+            "title": "Running Pods",
+            "type": "stat",
+            "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
+            "targets": [{
+              "expr": "count(kube_pod_status_phase{namespace=\"devsecops-apps\",phase=\"Running\"})"
+            }]
+          },
+          {
+            "title": "Total CPU Usage",
+            "type": "gauge",
+            "gridPos": {"h": 4, "w": 6, "x": 6, "y": 0},
+            "targets": [{
+              "expr": "sum(rate(container_cpu_usage_seconds_total{namespace=\"devsecops-apps\"}[5m]))"
+            }]
+          },
+          {
+            "title": "Total Memory Usage",
+            "type": "gauge",
+            "gridPos": {"h": 4, "w": 6, "x": 12, "y": 0},
+            "targets": [{
+              "expr": "sum(container_memory_working_set_bytes{namespace=\"devsecops-apps\"}) / 1024 / 1024"
+            }],
+            "fieldConfig": {"defaults": {"unit": "MB"}}
+          },
+          {
+            "title": "Pod Restarts (Last Hour)",
+            "type": "stat",
+            "gridPos": {"h": 4, "w": 6, "x": 18, "y": 0},
+            "targets": [{
+              "expr": "sum(increase(kube_pod_container_status_restarts_total{namespace=\"devsecops-apps\"}[1h]))"
+            }]
+          },
+          {
+            "title": "CPU Usage Per Service",
+            "type": "timeseries",
+            "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
+            "targets": [{
+              "expr": "sum(rate(container_cpu_usage_seconds_total{namespace=\"devsecops-apps\"}[5m])) by (pod)",
+              "legendFormat": "{{pod}}"
+            }]
+          },
+          {
+            "title": "Memory Usage Per Service",
+            "type": "timeseries",
+            "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
+            "targets": [{
+              "expr": "container_memory_working_set_bytes{namespace=\"devsecops-apps\"} / 1024 / 1024",
+              "legendFormat": "{{pod}}"
+            }],
+            "fieldConfig": {"defaults": {"unit": "MB"}}
+          },
+          {
+            "title": "Network I/O (Bytes/sec)",
+            "type": "timeseries",
+            "gridPos": {"h": 8, "w": 12, "x": 0, "y": 12},
+            "targets": [
+              {"expr": "sum(rate(container_network_receive_bytes_total{namespace=\"devsecops-apps\"}[5m])) by (pod)", "legendFormat": "{{pod}} RX"},
+              {"expr": "sum(rate(container_network_transmit_bytes_total{namespace=\"devsecops-apps\"}[5m])) by (pod)", "legendFormat": "{{pod}} TX"}
+            ]
+          },
+          {
+            "title": "HPA Status",
+            "type": "table",
+            "gridPos": {"h": 8, "w": 12, "x": 12, "y": 12},
+            "targets": [{
+              "expr": "kube_horizontalpodautoscaler_status_current_replicas{namespace=\"devsecops-apps\"}",
+              "format": "table"
+            }]
+          }
+        ]
+      }
+    }

@@ -1,0 +1,23 @@
+# Node
+node_modules/
+coverage/
+.env
+
+# Docker
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Ansible vault password
+ansible/.vault-password
+
+# Temp
+/tmp/
+*.tmp
+nohup.out

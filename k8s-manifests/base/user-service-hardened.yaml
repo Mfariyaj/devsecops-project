@@ -1,0 +1,97 @@
+# ============================================
+# HARDENED Deployment: Passes Trivy IaC scan
+# Fixes: KSV-0014 (readOnlyRootFilesystem)
+#        KSV-0118 (securityContext)
+# ============================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: user-service
+  namespace: devsecops-apps
+  labels:
+    app: user-service
+    version: v1
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: user-service
+  template:
+    metadata:
+      labels:
+        app: user-service
+        version: v1
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: user-service
+        image: user-service:v1
+        imagePullPolicy: Never
+        ports:
+        - containerPort: 3001
+          protocol: TCP
+        env:
+        - name: PORT
+          value: "3001"
+        - name: NODE_ENV
+          value: "production"
+        envFrom:
+        - configMapRef:
+            name: app-config
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "50m"
+          limits:
+            memory: "128Mi"
+            cpu: "200m"
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          capabilities:
+            drop:
+              - ALL
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 3001
+          initialDelaySeconds: 10
+          periodSeconds: 30
+          timeoutSeconds: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 3001
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 3
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      - name: tmp
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: user-service
+  namespace: devsecops-apps
+  labels:
+    app: user-service
+spec:
+  selector:
+    app: user-service
+  ports:
+  - port: 3001
+    targetPort: 3001
+    protocol: TCP
+  type: ClusterIP

@@ -1,0 +1,39 @@
+---
+# ============================================
+# Role: kubernetes - Deploy and manage services
+# ============================================
+- name: Ensure namespaces exist
+  shell: "kubectl create namespace {{ item }} --dry-run=client -o yaml | kubectl apply -f -"
+  loop: "{{ k8s_namespaces }}"
+  changed_when: false
+
+- name: Deploy microservices
+  command: "kubectl apply -f {{ project_dir }}/k8s-manifests/base/"
+  register: deploy_result
+  changed_when: "'configured' in deploy_result.stdout or 'created' in deploy_result.stdout"
+
+- name: Wait for all deployments to be ready
+  command: >
+    kubectl rollout status deployment/{{ item.name }}
+    -n devsecops-apps --timeout=120s
+  loop: "{{ services }}"
+  register: rollout_status
+  retries: 3
+  delay: 10
+  until: rollout_status.rc == 0
+
+- name: Apply HPA configurations
+  command: "kubectl apply -f {{ project_dir }}/k8s-manifests/base/hpa-user-service.yaml"
+  register: hpa_result
+  changed_when: "'configured' in hpa_result.stdout or 'created' in hpa_result.stdout"
+
+- name: Apply RBAC configurations
+  command: "kubectl apply -f {{ project_dir }}/k8s-manifests/base/rbac.yaml"
+  register: rbac_result
+  changed_when: "'configured' in rbac_result.stdout or 'created' in rbac_result.stdout"
+
+- name: Verify pod health
+  command: "kubectl get pods -n devsecops-apps -o jsonpath='{.items[*].status.phase}'"
+  register: pod_status
+  failed_when: "'Failed' in pod_status.stdout"
+  changed_when: false

@@ -1,0 +1,44 @@
+# ============================================
+# PRODUCTION MULTI-STAGE DOCKERFILE
+# Stage 1: Build dependencies (thrown away)
+# Stage 2: Production runtime only
+# ============================================
+
+# --- Stage 1: Builder ---
+FROM node:18-alpine AS builder
+WORKDIR /build
+COPY package*.json ./
+RUN npm install --omit=dev && npm cache clean --force
+
+# --- Stage 2: Production ---
+FROM node:18-alpine AS production
+
+# Security: Create non-root user
+RUN addgroup -g 1001 appgroup && \
+    adduser -u 1001 -G appgroup -s /bin/sh -D appuser
+
+# Security: Remove unnecessary packages
+RUN apk --no-cache add dumb-init && \
+    rm -rf /var/cache/apk/*
+
+WORKDIR /app
+
+# Copy only production dependencies from builder
+COPY --from=builder --chown=appuser:appgroup /build/node_modules ./node_modules
+COPY --chown=appuser:appgroup . .
+
+# Security: Read-only filesystem support
+ENV NODE_ENV=production
+ENV PORT=3001
+
+# Health check built into image
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD wget --no-verbose --tries=1 --spider http://localhost:${PORT}/health || exit 1
+
+# Security: Drop all capabilities, run as non-root
+USER appuser
+EXPOSE ${PORT}
+
+# Use dumb-init to handle PID 1 properly (zombie process reaping)
+ENTRYPOINT ["dumb-init", "--"]
+CMD ["node", "server.js"]

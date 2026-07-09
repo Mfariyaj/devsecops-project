@@ -1,0 +1,82 @@
+pipeline {
+    agent any
+    
+    environment {
+        SERVICE_NAME = "${params.SERVICE_NAME ?: 'user-service'}"
+        IMAGE_TAG = "v${BUILD_NUMBER}"
+        SONAR_URL = "http://sonarqube-sonarqube.sonarqube.svc.cluster.local:9000"
+    }
+    
+    parameters {
+        choice(name: 'SERVICE_NAME', choices: ['user-service', 'product-service', 'order-service', 'payment-service', 'cart-service', 'notification-service', 'inventory-service', 'shipping-service', 'review-service', 'gateway-service'], description: 'Select microservice to build')
+    }
+    
+    stages {
+        stage('Checkout') {
+            steps {
+                echo "Building ${SERVICE_NAME}..."
+                checkout scm
+            }
+        }
+        
+        stage('SonarQube Analysis') {
+            steps {
+                dir("microservices/${SERVICE_NAME}") {
+                    withSonarQubeEnv('SonarQube') {
+                        sh '''
+                            sonar-scanner \
+                              -Dsonar.projectKey=${SERVICE_NAME} \
+                              -Dsonar.sources=. \
+                              -Dsonar.exclusions=node_modules/**
+                        '''
+                    }
+                }
+            }
+        }
+        
+        stage('Build Docker Image') {
+            steps {
+                dir("microservices/${SERVICE_NAME}") {
+                    sh "docker build -t ${SERVICE_NAME}:${IMAGE_TAG} ."
+                }
+            }
+        }
+        
+        stage('Trivy Scan') {
+            steps {
+                sh """
+                    trivy image --severity HIGH,CRITICAL \
+                      --exit-code 0 \
+                      --format table \
+                      ${SERVICE_NAME}:${IMAGE_TAG}
+                """
+            }
+        }
+        
+        stage('Push to Registry') {
+            steps {
+                echo "In production: docker push to registry"
+                echo "Local: Image available in minikube docker"
+            }
+        }
+        
+        stage('Deploy to K8s') {
+            steps {
+                sh """
+                    kubectl set image deployment/${SERVICE_NAME} \
+                      ${SERVICE_NAME}=${SERVICE_NAME}:${IMAGE_TAG} \
+                      -n devsecops-apps
+                """
+            }
+        }
+    }
+    
+    post {
+        success {
+            echo "✅ Pipeline SUCCESS: ${SERVICE_NAME}:${IMAGE_TAG} deployed!"
+        }
+        failure {
+            echo "❌ Pipeline FAILED for ${SERVICE_NAME}"
+        }
+    }
+}

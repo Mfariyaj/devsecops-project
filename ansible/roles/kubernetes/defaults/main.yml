@@ -1,0 +1,20 @@
+---
+project_dir: "{{ ansible_env.HOME }}/devops-projects/devsecops-project"
+k8s_namespaces:
+  - devsecops-apps
+  - jenkins
+  - sonarqube
+  - argocd
+  - istio-system
+  - monitoring
+services:
+  - { name: "user-service", port: 3001 }
+  - { name: "product-service", port: 3002 }
+  - { name: "order-service", port: 3003 }
+  - { name: "payment-service", port: 3004 }
+  - { name: "cart-service", port: 3005 }
+  - { name: "notification-service", port: 3006 }
+  - { name: "inventory-service", port: 3007 }
+  - { name: "shipping-service", port: 3008 }
+  - { name: "review-service", port: 3009 }
+  - { name: "gateway-service", port: 3000 }

@@ -1,0 +1,163 @@
+# ============================================
+# Docker Compose: Full Microservices Stack
+# Usage: docker compose up -d
+# ============================================
+version: '3.8'
+
+networks:
+  frontend:
+    driver: bridge
+  backend:
+    driver: bridge
+  monitoring:
+    driver: bridge
+
+services:
+  # === API GATEWAY (public-facing) ===
+  gateway-service:
+    build: ./microservices/gateway-service
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - USER_SERVICE_HOST=user-service
+      - PRODUCT_SERVICE_HOST=product-service
+      - ORDER_SERVICE_HOST=order-service
+    networks:
+      - frontend
+      - backend
+    depends_on:
+      - user-service
+      - product-service
+      - order-service
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  # === CORE SERVICES ===
+  user-service:
+    build: ./microservices/user-service
+    ports:
+      - "3001:3001"
+    environment:
+      - PORT=3001
+      - NODE_ENV=production
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: '0.25'
+    restart: unless-stopped
+
+  product-service:
+    build: ./microservices/product-service
+    ports:
+      - "3002:3002"
+    environment:
+      - PORT=3002
+      - NODE_ENV=production
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3002/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: '0.25'
+    restart: unless-stopped
+
+  order-service:
+    build: ./microservices/order-service
+    ports:
+      - "3003:3003"
+    environment:
+      - PORT=3003
+      - NODE_ENV=production
+      - PAYMENT_SERVICE_URL=http://payment-service:3004
+      - INVENTORY_SERVICE_URL=http://inventory-service:3007
+    networks:
+      - backend
+    depends_on:
+      - payment-service
+      - inventory-service
+    restart: unless-stopped
+
+  payment-service:
+    build: ./microservices/payment-service
+    ports:
+      - "3004:3004"
+    environment:
+      - PORT=3004
+      - NODE_ENV=production
+    networks:
+      - backend
+    restart: unless-stopped
+
+  cart-service:
+    build: ./microservices/cart-service
+    ports:
+      - "3005:3005"
+    environment:
+      - PORT=3005
+      - NODE_ENV=production
+    networks:
+      - backend
+    restart: unless-stopped
+
+  notification-service:
+    build: ./microservices/notification-service
+    ports:
+      - "3006:3006"
+    environment:
+      - PORT=3006
+      - NODE_ENV=production
+    networks:
+      - backend
+    restart: unless-stopped
+
+  inventory-service:
+    build: ./microservices/inventory-service
+    ports:
+      - "3007:3007"
+    environment:
+      - PORT=3007
+      - NODE_ENV=production
+    networks:
+      - backend
+    restart: unless-stopped
+
+  shipping-service:
+    build: ./microservices/shipping-service
+    ports:
+      - "3008:3008"
+    environment:
+      - PORT=3008
+      - NODE_ENV=production
+    networks:
+      - backend
+    restart: unless-stopped
+
+  review-service:
+    build: ./microservices/review-service
+    ports:
+      - "3009:3009"
+    environment:
+      - PORT=3009
+      - NODE_ENV=production
+    networks:
+      - backend
+    restart: unless-stopped

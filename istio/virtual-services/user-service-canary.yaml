@@ -1,0 +1,67 @@
+# ============================================
+# Istio: Canary Deployment for user-service
+# Traffic Split: 90% v1, 10% v2 (canary)
+# ============================================
+---
+# DestinationRule: Define subsets (versions)
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: user-service-dr
+  namespace: devsecops-apps
+spec:
+  host: user-service
+  trafficPolicy:
+    connectionPool:
+      tcp:
+        maxConnections: 100
+      http:
+        h2UpgradePolicy: DEFAULT
+        http1MaxPendingRequests: 100
+        http2MaxRequests: 1000
+    outlierDetection:
+      consecutive5xxErrors: 3
+      interval: 30s
+      baseEjectionTime: 30s
+  subsets:
+  - name: v1
+    labels:
+      version: v1
+  - name: v2-canary
+    labels:
+      version: v2
+---
+# VirtualService: Traffic splitting rules
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: user-service-vs
+  namespace: devsecops-apps
+spec:
+  hosts:
+  - user-service
+  http:
+  # Route based on header (for testing canary manually)
+  - match:
+    - headers:
+        x-canary:
+          exact: "true"
+    route:
+    - destination:
+        host: user-service
+        subset: v2-canary
+  # Default: 90/10 split
+  - route:
+    - destination:
+        host: user-service
+        subset: v1
+      weight: 90
+    - destination:
+        host: user-service
+        subset: v2-canary
+      weight: 10
+    timeout: 10s
+    retries:
+      attempts: 3
+      perTryTimeout: 3s
+      retryOn: 5xx

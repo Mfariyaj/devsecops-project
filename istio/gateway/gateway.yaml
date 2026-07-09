@@ -1,0 +1,67 @@
+apiVersion: networking.istio.io/v1beta1
+kind: Gateway
+metadata:
+  name: devsecops-gateway
+  namespace: devsecops-apps
+spec:
+  selector:
+    istio: ingressgateway
+  servers:
+  - port:
+      number: 80
+      name: http
+      protocol: HTTP
+    hosts:
+    - "*.devsecops.local"
+---
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: microservices-routing
+  namespace: devsecops-apps
+spec:
+  hosts:
+  - "api.devsecops.local"
+  gateways:
+  - devsecops-gateway
+  http:
+  - match:
+    - uri:
+        prefix: /users
+    route:
+    - destination:
+        host: user-service
+        port:
+          number: 3001
+  - match:
+    - uri:
+        prefix: /products
+    route:
+    - destination:
+        host: product-service
+        port:
+          number: 3002
+  - match:
+    - uri:
+        prefix: /orders
+    route:
+    - destination:
+        host: order-service
+        port:
+          number: 3003
+  - match:
+    - uri:
+        prefix: /payments
+    route:
+    - destination:
+        host: payment-service
+        port:
+          number: 3004
+  - match:
+    - uri:
+        prefix: /cart
+    route:
+    - destination:
+        host: cart-service
+        port:
+          number: 3005

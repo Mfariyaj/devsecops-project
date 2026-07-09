@@ -1,0 +1,74 @@
+# ============================================
+# RBAC: Production Access Control
+# - developer: read-only access to pods/logs
+# - deployer: can deploy and scale
+# - admin: full namespace access
+# ============================================
+---
+# Role: Developer (read-only)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: developer
+  namespace: devsecops-apps
+rules:
+- apiGroups: [""]
+  resources: ["pods", "pods/log", "services", "configmaps"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["apps"]
+  resources: ["deployments", "replicasets"]
+  verbs: ["get", "list", "watch"]
+---
+# Role: Deployer (can deploy + scale)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: deployer
+  namespace: devsecops-apps
+rules:
+- apiGroups: [""]
+  resources: ["pods", "pods/log", "services", "configmaps", "secrets"]
+  verbs: ["get", "list", "watch", "create", "update", "patch"]
+- apiGroups: ["apps"]
+  resources: ["deployments", "replicasets"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["autoscaling"]
+  resources: ["horizontalpodautoscalers"]
+  verbs: ["get", "list", "watch", "create", "update"]
+---
+# ServiceAccount for CI/CD pipeline
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cicd-deployer
+  namespace: devsecops-apps
+---
+# Bind deployer role to CI/CD service account
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cicd-deployer-binding
+  namespace: devsecops-apps
+subjects:
+- kind: ServiceAccount
+  name: cicd-deployer
+  namespace: devsecops-apps
+roleRef:
+  kind: Role
+  name: deployer
+  apiGroup: rbac.authorization.k8s.io
+---
+# Bind developer role to dev team
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: dev-team-binding
+  namespace: devsecops-apps
+subjects:
+- kind: Group
+  name: developers
+  apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: Role
+  name: developer
+  apiGroup: rbac.authorization.k8s.io

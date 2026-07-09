@@ -1,0 +1,50 @@
+# ============================================
+# Istio: Strict mTLS (Zero-Trust Networking)
+# All service-to-service traffic MUST be encrypted
+# ============================================
+---
+# Namespace-wide: Require mTLS for all services
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: default-mtls
+  namespace: devsecops-apps
+spec:
+  mtls:
+    mode: STRICT
+---
+# Authorization Policy: Only gateway can reach user-service
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: user-service-authz
+  namespace: devsecops-apps
+spec:
+  selector:
+    matchLabels:
+      app: user-service
+  action: ALLOW
+  rules:
+  - from:
+    - source:
+        principals: ["cluster.local/ns/devsecops-apps/sa/default"]
+    to:
+    - operation:
+        methods: ["GET", "POST"]
+        paths: ["/users*", "/health"]
+---
+# Deny all by default for payment service (critical)
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: payment-service-deny-all
+  namespace: devsecops-apps
+spec:
+  selector:
+    matchLabels:
+      app: payment-service
+  action: DENY
+  rules:
+  - from:
+    - source:
+        notNamespaces: ["devsecops-apps"]
